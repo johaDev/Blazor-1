@@ -1,30 +1,51 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <Import Project="..\mono\mono.targets" />
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFramework>netstandard1.0</TargetFramework>
+    <BlazorBuildToolsExe>$(ArtifactsBinDir)Microsoft.AspNetCore.Blazor.BuildTools/netcoreapp2.1/Microsoft.AspNetCore.Blazor.BuildTools.dll</BlazorBuildToolsExe>
+  </PropertyGroup>
+
+  <!-- Pack settings -->
+  <Target Name="_SetNuSpecProperties" BeforeTargets="_IntermediatePack">
+    <PropertyGroup>
+      <NoPackageAnalysis>true</NoPackageAnalysis>
+      <NuspecFile>Microsoft.AspNetCore.Blazor.Mono.nuspec</NuspecFile>
+      <NuspecProperties>
+        version=$(PackageVersion);
+      </NuspecProperties>
+    </PropertyGroup>
+  </Target>
+
+  <PropertyGroup>
+    <MonoIncomingDir>$(MSBuildThisFileDirectory)incoming\</MonoIncomingDir>
+    <MonoDistDir>$(MSBuildThisFileDirectory)dist\</MonoDistDir>
+    <BclWipeSpecDir>$(MSBuildThisFileDirectory)bclwipe\</BclWipeSpecDir>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Microsoft.AspNetCore.Blazor.Common\Microsoft.AspNetCore.Blazor.Common.csproj" />
+    <WasmItemsToCopy Include="$(MonoIncomingDir)wasm\**" />
+    <BclItemsToCopy Include="$(MonoIncomingDir)bcl\**" />
+    <BclWipeSpecFiles Include="$(BclWipeSpecDir)**" />
   </ItemGroup>
 
-  <Target Name="EmbedMonoResources" BeforeTargets="PreBuildEvent" DependsOnTargets="OptimizeMono" Inputs="$(MonoUnoptimizedDir)\**" Outputs="$(MonoOptimizedDir)\**">
-    <ItemGroup>
-      <MonoWasmResourcesToEmbed Include="$(MonoOptimizedDir)wasm/**" />
-      <MonoAsmJsResourcesToEmbed Include="$(MonoOptimizedDir)asmjs/**" />
-      <MonoBclResourcesToEmbed Include="$(MonoOptimizedDir)bcl/**" />
-      <EmbeddedResource Include="@(MonoWasmResourcesToEmbed)">
-        <LogicalName>mono.js./wasm$([System.String]::Copy('/%(RecursiveDir)%(FileName)%(Extension)').Replace('\', '/'))</LogicalName>
-      </EmbeddedResource>
-      <EmbeddedResource Include="@(MonoAsmJsResourcesToEmbed)">
-        <LogicalName>mono.js./asmjs$([System.String]::Copy('/%(RecursiveDir)%(FileName)%(Extension)').Replace('\', '/'))</LogicalName>
-      </EmbeddedResource>
-      <EmbeddedResource Include="@(MonoBclResourcesToEmbed)">
-        <LogicalName>mono.bcl./bcl$([System.String]::Copy('/%(RecursiveDir)%(FileName)%(Extension)').Replace('\', '/'))</LogicalName>
-      </EmbeddedResource>
-    </ItemGroup>
+  <Target Name="OptimizeMono" DependsOnTargets="OptimizeMonoWasm; OptimizeBcl" BeforeTargets="Build" />
+
+  <Target Name="OptimizeMonoWasm" Inputs="@(WasmItemsToCopy)" Outputs="@(WasmItemsToCopy->'$(MonoDistDir)wasm\%(RecursiveDir)%(FileName)%(Extension)')">
+    <!-- TODO: Implement WASM code stripping like in prototype -->
+    <Message Importance="High" Text="Creating optimized Mono WebAssembly build" />
+    <Copy SourceFiles="@(WasmItemsToCopy)" DestinationFiles="@(WasmItemsToCopy->'$(MonoDistDir)wasm\%(RecursiveDir)%(FileName)%(Extension)')" />
+  </Target>
+
+  <Target Name="OptimizeBcl" Inputs="@(BclItemsToCopy);@(BclWipeSpecFiles)" Outputs="@(BclItemsToCopy->'$(MonoDistDir)bcl\%(RecursiveDir)%(FileName)%(Extension)')">
+    <!-- Ensure the buildtools project builds first so we can use the resulting executable -->
+    <MSBuild Projects="..\Microsoft.AspNetCore.Blazor.BuildTools\Microsoft.AspNetCore.Blazor.BuildTools.csproj" />
+
+    <Message Importance="High" Text="Creating optimized BCL build" />
+    <Copy SourceFiles="@(BclItemsToCopy)" DestinationFiles="@(BclItemsToCopy->'$(MonoDistDir)bcl\%(RecursiveDir)%(FileName)%(Extension)')">
+      <Output TaskParameter="CopiedFiles" ItemName="_BclFilesCopied" />
+    </Copy>
+    <Exec Command="dotnet &quot;$(BlazorBuildToolsExe)&quot; ilwipe -s &quot;$(BclWipeSpecDir.TrimEnd('\'))&quot; -i &quot;$(MonoIncomingDir)bcl&quot; -o &quot;$(MonoDistDir)bcl&quot;" />
+    <Touch Files="@(_BclFilesCopied)" /> <!-- Make incremental builds work -->
   </Target>
 
 </Project>
